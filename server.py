@@ -299,6 +299,9 @@ def get_flagged_messages(
                 return f"Unknown flag color: {color}\n\nAvailable: {labels}"
 
         # Query flagged messages
+        # Note: server_messages.flag_color has the REAL color (0-6 bit pattern)
+        # while messages.flag_color is often just 1 (red) regardless of actual color
+        # We convert server_messages.flag_color (0-6) to our 1-7 range by adding 1
         with db.connection() as conn:
             query = """
                 SELECT
@@ -309,7 +312,7 @@ def get_flagged_messages(
                     m.date_received,
                     m.read,
                     m.flagged,
-                    m.flag_color,
+                    COALESCE(sm.flag_color + 1, m.flag_color) as flag_color,
                     sender_addr.address as sender_email,
                     sender_addr.comment as sender_name,
                     mb.url as mailbox_url
@@ -317,12 +320,14 @@ def get_flagged_messages(
                 LEFT JOIN subjects subj ON m.subject = subj.ROWID
                 LEFT JOIN addresses sender_addr ON m.sender = sender_addr.ROWID
                 LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
+                LEFT JOIN server_messages sm ON sm.message = m.ROWID
                 WHERE m.flagged = 1
             """
             params = []
 
             if flag_color_filter:
-                query += " AND m.flag_color = ?"
+                # server_messages uses 0-6 (bit pattern), we use 1-7, so subtract 1
+                query += " AND COALESCE(sm.flag_color + 1, m.flag_color) = ?"
                 params.append(flag_color_filter)
 
             if folder:
@@ -341,13 +346,15 @@ def get_flagged_messages(
                 # Show what colors ARE in the database to help diagnose
                 with db.connection() as conn2:
                     diag = conn2.execute('''
-                        SELECT flag_color, COUNT(*) as cnt
-                        FROM messages WHERE flagged = 1
-                        GROUP BY flag_color ORDER BY cnt DESC
+                        SELECT COALESCE(sm.flag_color + 1, m.flag_color) as real_color, COUNT(*) as cnt
+                        FROM messages m
+                        LEFT JOIN server_messages sm ON sm.message = m.ROWID
+                        WHERE m.flagged = 1
+                        GROUP BY real_color ORDER BY cnt DESC
                     ''').fetchall()
                 if diag:
                     available = ", ".join([f"{format_flag(r[0])} ({r[1]})" for r in diag])
-                    return f"No {label} flagged messages found.\n\nFlags in database: {available}\n\n*Note: Mail.app may store all flags with color=1 (red) internally. Try `get_flagged_messages()` without a color filter to see all flagged messages.*"
+                    return f"No {label} flagged messages found.\n\nFlags in database: {available}"
                 return f"No {label} flagged messages found"
             return "No flagged messages found"
 
@@ -400,11 +407,15 @@ def list_flag_colors() -> str:
         db = MailDatabase()
 
         # Check what flag colors actually exist in the database
+        # Use server_messages.flag_color which has the real color (0-6 bit pattern)
+        # Convert to 1-7 range by adding 1
         with db.connection() as conn:
             cursor = conn.execute('''
-                SELECT flag_color, COUNT(*) as cnt
-                FROM messages WHERE flagged = 1
-                GROUP BY flag_color ORDER BY flag_color
+                SELECT COALESCE(sm.flag_color + 1, m.flag_color) as real_color, COUNT(*) as cnt
+                FROM messages m
+                LEFT JOIN server_messages sm ON sm.message = m.ROWID
+                WHERE m.flagged = 1
+                GROUP BY real_color ORDER BY real_color
             ''')
             db_colors = {row[0]: row[1] for row in cursor.fetchall()}
 
@@ -421,11 +432,7 @@ def list_flag_colors() -> str:
             lines.append(f"| {emoji} | {color} | {name} | {count_str} |")
 
         lines.append("")
-        if len(db_colors) == 1 and 1 in db_colors:
-            lines.append("*Note: Mail.app appears to store all flags with color=1 (Red) internally.*")
-            lines.append("*Color filtering may not work as expected. Use `get_flagged_messages()` to see all.*")
-        else:
-            lines.append("*Use the color name or your custom label when filtering flagged messages*")
+        lines.append("*Use the color name or your custom label when filtering flagged messages*")
 
         return "\n".join(lines)
 

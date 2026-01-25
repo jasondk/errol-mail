@@ -177,6 +177,9 @@ def cmd_flagged(args):
             return 1
 
     # Query flagged messages
+    # Note: server_messages.flag_color has the REAL color (0-6 bit pattern)
+    # while messages.flag_color is often just 1 (red) regardless of actual color
+    # We convert server_messages.flag_color (0-6) to our 1-7 range by adding 1
     with db.connection() as conn:
         query = """
             SELECT
@@ -187,7 +190,7 @@ def cmd_flagged(args):
                 m.date_received,
                 m.read,
                 m.flagged,
-                m.flag_color,
+                COALESCE(sm.flag_color + 1, m.flag_color) as flag_color,
                 sender_addr.address as sender_email,
                 sender_addr.comment as sender_name,
                 mb.url as mailbox_url
@@ -195,12 +198,13 @@ def cmd_flagged(args):
             LEFT JOIN subjects subj ON m.subject = subj.ROWID
             LEFT JOIN addresses sender_addr ON m.sender = sender_addr.ROWID
             LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
+            LEFT JOIN server_messages sm ON sm.message = m.ROWID
             WHERE m.flagged = 1
         """
         params = []
 
         if flag_color_filter:
-            query += " AND m.flag_color = ?"
+            query += " AND COALESCE(sm.flag_color + 1, m.flag_color) = ?"
             params.append(flag_color_filter)
 
         if args.folder:
