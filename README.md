@@ -10,8 +10,6 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center"><em>Named after the Weasley family's loyal (if clumsy) owl from Harry Potter</em></p>
-
 An MCP server that gives Claude comprehensive access to Apple Mail—not just reading, but **managing** your inbox. Search emails, read threads, triage messages by setting flags and read status, and even fetch old emails from the server that aren't downloaded locally. All message modifications run **headlessly** via AppleScript, so Claude can organize your inbox without Mail windows popping up everywhere.
 
 ## Features
