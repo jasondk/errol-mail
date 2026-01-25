@@ -406,11 +406,13 @@ def list_flag_colors() -> str:
 
         with db.connection() as conn:
             # Count by color using bits 39-41 of flags field
+            # Note: Using subquery because SQLite GROUP BY on expressions can be inconsistent
             cursor = conn.execute('''
-                SELECT (flags >> 39) & 7 as flag_color, COUNT(*) as cnt
-                FROM messages
-                WHERE flagged = 1
-                GROUP BY flag_color
+                SELECT flag_color, COUNT(*) as cnt FROM (
+                    SELECT (flags >> 39) & 7 as flag_color
+                    FROM messages
+                    WHERE flagged = 1
+                ) GROUP BY flag_color
             ''')
             for row in cursor:
                 color = row[0] + 1  # Convert 0-6 to 1-7
