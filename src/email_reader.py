@@ -19,10 +19,10 @@ def get_emlx_flag_color(file_path: str) -> Optional[int]:
     """
     Extract flag color from emlx file's plist metadata.
 
-    Apple Mail stores the flag color in bits 8-10 of the 'flags' integer
+    Apple Mail stores the flag color in bits 39-41 of the 'flags' integer
     in the plist metadata at the end of .emlx files.
 
-    Color mapping (bits 8-10 value):
+    Color mapping (bits 39-41 value):
         0 = Red, 1 = Orange, 2 = Yellow, 3 = Green,
         4 = Blue, 5 = Purple, 6 = Gray
 
@@ -47,8 +47,8 @@ def get_emlx_flag_color(file_path: str) -> Optional[int]:
             plist_data = content[plist_start:]
             metadata = plistlib.loads(plist_data)
             flags_int = metadata.get('flags', 0)
-            # Flag color is stored in bits 8-10
-            return (flags_int >> 8) & 0x7
+            # Flag color is stored in bits 39-41
+            return (flags_int >> 39) & 0x7
     except Exception:
         pass
 
