@@ -29,7 +29,8 @@ class MessageQuery:
         mailbox_id: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
-        include_read: bool = True
+        include_read: bool = True,
+        exclude_folders: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
         Get recent messages, optionally filtered by mailbox.
@@ -39,13 +40,40 @@ class MessageQuery:
             limit: Maximum number of messages to return
             offset: Number of messages to skip (for pagination)
             include_read: Whether to include read messages (False = unread only)
+            exclude_folders: List of folder name patterns to exclude (e.g., ["Junk", "Spam"])
 
         Returns:
             List of message dictionaries
         """
         with self.db.connection() as conn:
-            # messages.sender is a direct FK to addresses.ROWID
-            query = """
+            # Build subquery to get message ROWIDs first (fast, no joins)
+            subquery = "SELECT ROWID FROM messages WHERE 1=1"
+            subquery_params = []
+
+            if mailbox_id is not None:
+                subquery += " AND mailbox = ?"
+                subquery_params.append(mailbox_id)
+
+            if not include_read:
+                subquery += " AND read = 0"
+
+            # Handle exclude_folders by getting excluded mailbox IDs
+            excluded_mailbox_ids = []
+            if exclude_folders:
+                like_clauses = " OR ".join(["url LIKE ?" for _ in exclude_folders])
+                exclude_query = f"SELECT ROWID FROM mailboxes WHERE {like_clauses}"
+                exclude_params = [f"%{pattern}%" for pattern in exclude_folders]
+                excluded_mailbox_ids = [row[0] for row in conn.execute(exclude_query, exclude_params).fetchall()]
+                if excluded_mailbox_ids:
+                    placeholders = ",".join("?" * len(excluded_mailbox_ids))
+                    subquery += f" AND mailbox NOT IN ({placeholders})"
+                    subquery_params.extend(excluded_mailbox_ids)
+
+            subquery += " ORDER BY date_received DESC LIMIT ? OFFSET ?"
+            subquery_params.extend([limit, offset])
+
+            # Main query joins only the rows we need
+            query = f"""
                 SELECT
                     m.ROWID as message_id,
                     m.mailbox,
@@ -67,19 +95,10 @@ class MessageQuery:
                 LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
                 LEFT JOIN subjects subj ON m.subject = subj.ROWID
                 LEFT JOIN addresses sender_addr ON m.sender = sender_addr.ROWID
-                WHERE 1=1
+                WHERE m.ROWID IN ({subquery})
+                ORDER BY m.date_received DESC
             """
-            params = []
-
-            if mailbox_id is not None:
-                query += " AND m.mailbox = ?"
-                params.append(mailbox_id)
-
-            if not include_read:
-                query += " AND m.read = 0"
-
-            query += " ORDER BY m.date_received DESC LIMIT ? OFFSET ?"
-            params.extend([limit, offset])
+            params = subquery_params
 
             cursor = conn.execute(query, params)
 

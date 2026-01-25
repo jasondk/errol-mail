@@ -10,7 +10,7 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center"><em>NOTE: This is an IN-PROGRESS project and is still in testing. All features may not yet be working.</em></p>
+<p align="center"><strong>NOTE: This is an IN-PROGRESS project and is still in testing. All features may not yet be working.</strong></p>
 
 An MCP (Model Context Protocol) server that provides AI assistants with comprehensive access to Apple Mail. Like Errol delivering letters to the Burrow, this tool fetches your emails for Claude-though possibly with fewer crash landings (???)
 
@@ -193,7 +193,25 @@ python server.py --test
 
 ## Claude Skill
 
-A Claude Code skill is included for enhanced AI integration:
+A Claude Code skill is included that teaches Claude how to effectively use Errol for email tasks. The skill provides workflow patterns, task templates, and complete API documentation.
+
+### Installing the Skill
+
+**Option 1: Copy the skill folder**
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r skill ~/.claude/skills/errol
+```
+
+**Option 2: Extract from .skill package**
+
+```bash
+mkdir -p ~/.claude/skills
+unzip errol.skill -d ~/.claude/skills/errol
+```
+
+### Skill Contents
 
 ```
 ~/.claude/skills/errol/
@@ -202,10 +220,32 @@ A Claude Code skill is included for enhanced AI integration:
     └── api_reference.md        # Complete API documentation
 ```
 
-The skill provides:
-- Workflow patterns (Discover → Summarize → Deep Dive)
-- Common task templates
-- Complete API reference with examples
+### What the Skill Provides
+
+- **Trigger phrases** - Claude automatically recognizes "check my email", "what's in my inbox", etc.
+- **Workflow patterns** - Discover → Summarize → Deep Dive approach for email triage
+- **Task templates** - Common patterns for searching, reading threads, processing attachments
+- **Complete API reference** - Every tool with parameters, examples, and return formats
+
+### Customizing the Skill
+
+The skill is a great place to add your own email automation workflows. Edit `~/.claude/skills/errol/SKILL.md` to add custom patterns:
+
+```markdown
+## My Custom Workflows
+
+### Morning Email Triage
+1. Check unread messages: `get_unread_messages(limit=20)`
+2. Flag urgent items red: `set_email_flag(message_id, "red")`
+3. Mark newsletters as read: `mark_email_read(message_id)`
+
+### Weekly Report Processing
+1. Search for reports: `search_messages(subject="weekly report", days_back=7)`
+2. Extract attachments: `extract_all_message_attachments(message_id)`
+3. Flag as processed: `set_email_flag(message_id, "green")`
+```
+
+Claude will learn your patterns and apply them when you ask for help with similar tasks.
 
 ## Architecture
 
