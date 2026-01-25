@@ -30,7 +30,7 @@ from database import (
     DEFAULT_FLAG_COLORS
 )
 from messages import MessageQuery
-from email_reader import parse_emlx_file
+from email_reader import parse_emlx_file, get_emlx_flag_color
 from threads import ThreadQuery
 from attachments import (
     list_attachments as list_email_attachments,
@@ -274,9 +274,10 @@ def get_flagged_messages(
     """
     try:
         db = MailDatabase()
+        mq = MessageQuery(db)
         flag_names = get_flag_names()
 
-        # Map color names to flag_color values
+        # Map color names to flag_color values (1-7 range)
         color_map = {
             "red": 1, "orange": 2, "yellow": 3, "green": 4,
             "blue": 5, "purple": 6, "gray": 7, "grey": 7
@@ -298,10 +299,8 @@ def get_flagged_messages(
                 labels = ", ".join([f"{FLAG_EMOJIS.get(fc, '')} {name}" for fc, name in flag_names.items()])
                 return f"Unknown flag color: {color}\n\nAvailable: {labels}"
 
-        # Query flagged messages
-        # Note: server_messages.flag_color has the REAL color (0-6 bit pattern)
-        # while messages.flag_color is often just 1 (red) regardless of actual color
-        # We convert server_messages.flag_color (0-6) to our 1-7 range by adding 1
+        # Query ALL flagged messages - we'll determine actual color from emlx files
+        # The database flag_color is unreliable, and server_messages only has ~20% of messages
         with db.connection() as conn:
             query = """
                 SELECT
@@ -312,7 +311,7 @@ def get_flagged_messages(
                     m.date_received,
                     m.read,
                     m.flagged,
-                    COALESCE(sm.flag_color + 1, m.flag_color) as flag_color,
+                    sm.flag_color as server_flag_color,
                     sender_addr.address as sender_email,
                     sender_addr.comment as sender_name,
                     mb.url as mailbox_url
@@ -325,54 +324,89 @@ def get_flagged_messages(
             """
             params = []
 
-            if flag_color_filter:
-                # server_messages uses 0-6 (bit pattern), we use 1-7, so subtract 1
-                query += " AND COALESCE(sm.flag_color + 1, m.flag_color) = ?"
-                params.append(flag_color_filter)
-
             if folder:
                 query += " AND mb.url LIKE ?"
                 params.append(f"%{folder}%")
 
-            query += " ORDER BY m.date_received DESC LIMIT ?"
-            params.append(limit)
+            query += " ORDER BY m.date_received DESC"
 
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
 
         if not rows:
+            return "No flagged messages found"
+
+        # Process rows and determine actual flag color from emlx files
+        processed_rows = []
+        color_counts = {}
+
+        for row in rows:
+            msg_id = row["message_id"]
+            mailbox_url = row["mailbox_url"]
+            server_color = row["server_flag_color"]
+
+            # Determine actual flag color:
+            # 1. Try server_messages.flag_color (if available) - uses 0-6 range
+            # 2. Fall back to reading from emlx file (also 0-6 range)
+            if server_color is not None:
+                actual_color = server_color + 1  # Convert 0-6 to 1-7
+            else:
+                # Read color from emlx file metadata
+                file_path = mq._build_file_path(msg_id, mailbox_url)
+                if file_path:
+                    emlx_color = get_emlx_flag_color(file_path)
+                    if emlx_color is not None:
+                        actual_color = emlx_color + 1  # Convert 0-6 to 1-7
+                    else:
+                        actual_color = 1  # Default to red if unreadable
+                else:
+                    actual_color = 1  # Default to red if no file
+
+            # Track color counts
+            color_counts[actual_color] = color_counts.get(actual_color, 0) + 1
+
+            # Apply color filter (if specified)
+            if flag_color_filter and actual_color != flag_color_filter:
+                continue
+
+            processed_rows.append({
+                "message_id": msg_id,
+                "subject_prefix": row["subject_prefix"],
+                "subject_text": row["subject_text"],
+                "date_received": row["date_received"],
+                "sender_email": row["sender_email"],
+                "sender_name": row["sender_name"],
+                "flag_color": actual_color,
+            })
+
+            # Stop if we have enough
+            if len(processed_rows) >= limit:
+                break
+
+        if not processed_rows:
             if flag_color_filter:
                 label = format_flag(flag_color_filter)
-                # Show what colors ARE in the database to help diagnose
-                with db.connection() as conn2:
-                    diag = conn2.execute('''
-                        SELECT COALESCE(sm.flag_color + 1, m.flag_color) as real_color, COUNT(*) as cnt
-                        FROM messages m
-                        LEFT JOIN server_messages sm ON sm.message = m.ROWID
-                        WHERE m.flagged = 1
-                        GROUP BY real_color ORDER BY cnt DESC
-                    ''').fetchall()
-                if diag:
-                    available = ", ".join([f"{format_flag(r[0])} ({r[1]})" for r in diag])
-                    return f"No {label} flagged messages found.\n\nFlags in database: {available}"
-                return f"No {label} flagged messages found"
+                available = ", ".join([f"{format_flag(c)} ({cnt})" for c, cnt in sorted(color_counts.items())])
+                return f"No {label} flagged messages found.\n\nFlags in database: {available}"
             return "No flagged messages found"
 
         # Format as table
         if flag_color_filter:
             label = format_flag(flag_color_filter)
-            header = f"# Flagged Messages - {label} ({len(rows)})"
+            total_matching = color_counts.get(flag_color_filter, 0)
+            header = f"# Flagged Messages - {label} ({len(processed_rows)} of {total_matching})"
         else:
-            header = f"# All Flagged Messages ({len(rows)})"
+            header = f"# All Flagged Messages ({len(processed_rows)})"
 
         lines = [header, ""]
-        lines.append("| Flag | Date | From | Subject |")
-        lines.append("|------|------|------|---------|")
+        lines.append("| ID | Flag | Date | From | Subject |")
+        lines.append("|---:|------|------|------|---------|")
 
-        for row in rows:
+        for row in processed_rows:
             subject = (row["subject_prefix"] or "") + (row["subject_text"] or "")
             sender = row["sender_name"] or row["sender_email"] or "Unknown"
             flag_emoji = FLAG_EMOJIS.get(row["flag_color"], "🚩")
+            msg_id = row["message_id"]
 
             # Format date
             if row["date_received"]:
@@ -383,10 +417,10 @@ def get_flagged_messages(
             # Truncate for table display
             if len(sender) > 30:
                 sender = sender[:27] + "..."
-            if len(subject) > 45:
-                subject = subject[:42] + "..."
+            if len(subject) > 40:
+                subject = subject[:37] + "..."
 
-            lines.append(f"| {flag_emoji} | {date_str} | {sender} | {subject} |")
+            lines.append(f"| {msg_id} | {flag_emoji} | {date_str} | {sender} | {subject} |")
 
         return "\n".join(lines)
 
@@ -405,19 +439,41 @@ def list_flag_colors() -> str:
     try:
         flag_names = get_flag_names()
         db = MailDatabase()
+        mq = MessageQuery(db)
 
-        # Check what flag colors actually exist in the database
-        # Use server_messages.flag_color which has the real color (0-6 bit pattern)
-        # Convert to 1-7 range by adding 1
+        # Get actual flag colors by reading from emlx files
+        # The database flag_color is unreliable, so we read from file metadata
+        color_counts = {i: 0 for i in range(1, 8)}
+
         with db.connection() as conn:
             cursor = conn.execute('''
-                SELECT COALESCE(sm.flag_color + 1, m.flag_color) as real_color, COUNT(*) as cnt
+                SELECT m.ROWID, sm.flag_color, mb.url
                 FROM messages m
+                LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
                 LEFT JOIN server_messages sm ON sm.message = m.ROWID
                 WHERE m.flagged = 1
-                GROUP BY real_color ORDER BY real_color
             ''')
-            db_colors = {row[0]: row[1] for row in cursor.fetchall()}
+            rows = cursor.fetchall()
+
+        for row in rows:
+            msg_id, server_color, mailbox_url = row
+
+            # Determine actual color from server_messages or emlx file
+            if server_color is not None:
+                actual_color = server_color + 1  # Convert 0-6 to 1-7
+            else:
+                file_path = mq._build_file_path(msg_id, mailbox_url)
+                if file_path:
+                    emlx_color = get_emlx_flag_color(file_path)
+                    if emlx_color is not None:
+                        actual_color = emlx_color + 1
+                    else:
+                        actual_color = 1
+                else:
+                    actual_color = 1
+
+            if 1 <= actual_color <= 7:
+                color_counts[actual_color] += 1
 
         lines = ["# Your Flag Colors\n"]
         lines.append("| Emoji | Color | Your Label | In Database |")
@@ -427,7 +483,7 @@ def list_flag_colors() -> str:
             emoji = FLAG_EMOJIS.get(fc, "")
             color = DEFAULT_FLAG_COLORS.get(fc, f"Color {fc}")
             name = flag_names.get(fc, color)
-            count = db_colors.get(fc, 0)
+            count = color_counts.get(fc, 0)
             count_str = f"{count} msgs" if count > 0 else "-"
             lines.append(f"| {emoji} | {color} | {name} | {count_str} |")
 

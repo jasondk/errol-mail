@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from database import MailDatabase, MailDatabaseError, format_flag, get_flag_names, FLAG_EMOJIS
 from messages import MessageQuery
+from email_reader import get_emlx_flag_color
 
 
 def cmd_mailboxes(args):
@@ -144,10 +145,13 @@ def cmd_search(args):
 
 def cmd_flagged(args):
     """List flagged messages"""
+    from datetime import datetime
+
     db = MailDatabase()
+    mq = MessageQuery(db)
     flag_names = get_flag_names()
 
-    # Map color names to flag_color values
+    # Map color names to flag_color values (1-7 range)
     color_map = {
         "red": 1, "orange": 2, "yellow": 3, "green": 4,
         "blue": 5, "purple": 6, "gray": 7, "grey": 7
@@ -176,10 +180,8 @@ def cmd_flagged(args):
                 print(f"  {emoji} {name}")
             return 1
 
-    # Query flagged messages
-    # Note: server_messages.flag_color has the REAL color (0-6 bit pattern)
-    # while messages.flag_color is often just 1 (red) regardless of actual color
-    # We convert server_messages.flag_color (0-6) to our 1-7 range by adding 1
+    # Query ALL flagged messages - we'll determine actual color from emlx files
+    # The database flag_color is unreliable, and server_messages only has ~20% of messages
     with db.connection() as conn:
         query = """
             SELECT
@@ -190,7 +192,7 @@ def cmd_flagged(args):
                 m.date_received,
                 m.read,
                 m.flagged,
-                COALESCE(sm.flag_color + 1, m.flag_color) as flag_color,
+                sm.flag_color as server_flag_color,
                 sender_addr.address as sender_email,
                 sender_addr.comment as sender_name,
                 mb.url as mailbox_url
@@ -203,21 +205,64 @@ def cmd_flagged(args):
         """
         params = []
 
-        if flag_color_filter:
-            query += " AND COALESCE(sm.flag_color + 1, m.flag_color) = ?"
-            params.append(flag_color_filter)
-
         if args.folder:
             query += " AND mb.url LIKE ?"
             params.append(f"%{args.folder}%")
 
-        query += " ORDER BY m.date_received DESC LIMIT ?"
-        params.append(args.limit)
+        query += " ORDER BY m.date_received DESC"
 
         cursor = conn.execute(query, params)
         rows = cursor.fetchall()
 
     if not rows:
+        print("\nNo flagged messages found")
+        return 0
+
+    # Process rows and determine actual flag color from emlx files
+    processed_rows = []
+
+    for row in rows:
+        msg_id = row["message_id"]
+        mailbox_url = row["mailbox_url"]
+        server_color = row["server_flag_color"]
+
+        # Determine actual flag color from server_messages or emlx file
+        if server_color is not None:
+            actual_color = server_color + 1  # Convert 0-6 to 1-7
+        else:
+            file_path = mq._build_file_path(msg_id, mailbox_url)
+            if file_path:
+                emlx_color = get_emlx_flag_color(file_path)
+                if emlx_color is not None:
+                    actual_color = emlx_color + 1
+                else:
+                    actual_color = 1
+            else:
+                actual_color = 1
+
+        # Apply color filter (if specified)
+        if flag_color_filter and actual_color != flag_color_filter:
+            continue
+
+        subject = (row["subject_prefix"] or "") + (row["subject_text"] or "")
+        sender = row["sender_name"] or row["sender_email"] or "Unknown"
+
+        msg = {
+            "message_id": msg_id,
+            "subject": subject,
+            "date_received": datetime.fromtimestamp(row["date_received"]).isoformat() if row["date_received"] else None,
+            "is_read": bool(row["read"]),
+            "is_flagged": bool(row["flagged"]),
+            "flag_color": actual_color,
+            "from": sender,
+        }
+        processed_rows.append(msg)
+
+        # Stop if we have enough
+        if len(processed_rows) >= args.limit:
+            break
+
+    if not processed_rows:
         if flag_color_filter:
             label = format_flag(flag_color_filter)
             print(f"\nNo {label} flagged messages found")
@@ -228,26 +273,13 @@ def cmd_flagged(args):
     # Header
     if flag_color_filter:
         label = format_flag(flag_color_filter)
-        print(f"\nFlagged Messages - {label} ({len(rows)}):")
+        print(f"\nFlagged Messages - {label} ({len(processed_rows)}):")
     else:
-        print(f"\nAll Flagged Messages ({len(rows)}):")
+        print(f"\nAll Flagged Messages ({len(processed_rows)}):")
     print("=" * 70)
 
     # Print messages
-    from datetime import datetime
-    for row in rows:
-        subject = (row["subject_prefix"] or "") + (row["subject_text"] or "")
-        sender = row["sender_name"] or row["sender_email"] or "Unknown"
-
-        msg = {
-            "message_id": row["message_id"],
-            "subject": subject,
-            "date_received": datetime.fromtimestamp(row["date_received"]).isoformat() if row["date_received"] else None,
-            "is_read": bool(row["read"]),
-            "is_flagged": bool(row["flagged"]),
-            "flag_color": row["flag_color"],
-            "from": sender,
-        }
+    for msg in processed_rows:
         _print_message(msg, show_flag_detail=True)
 
     return 0

@@ -10,8 +10,49 @@ import email.policy
 from email.header import decode_header
 from pathlib import Path
 from typing import Dict, Optional, Any, List
+import plistlib
 import re
 import os
+
+
+def get_emlx_flag_color(file_path: str) -> Optional[int]:
+    """
+    Extract flag color from emlx file's plist metadata.
+
+    Apple Mail stores the flag color in bits 8-10 of the 'flags' integer
+    in the plist metadata at the end of .emlx files.
+
+    Color mapping (bits 8-10 value):
+        0 = Red, 1 = Orange, 2 = Yellow, 3 = Green,
+        4 = Blue, 5 = Purple, 6 = Gray
+
+    Args:
+        file_path: Path to the .emlx file
+
+    Returns:
+        Flag color as integer (0-6), or None if unable to read
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            content = f.read()
+
+        # Find plist section (starts with <?xml or <!DOCTYPE plist)
+        plist_start = content.find(b'<?xml')
+        if plist_start == -1:
+            plist_start = content.find(b'<!DOCTYPE plist')
+        if plist_start == -1:
+            plist_start = content.find(b'<plist')
+
+        if plist_start > 0:
+            plist_data = content[plist_start:]
+            metadata = plistlib.loads(plist_data)
+            flags_int = metadata.get('flags', 0)
+            # Flag color is stored in bits 8-10
+            return (flags_int >> 8) & 0x7
+    except Exception:
+        pass
+
+    return None
 
 
 def decode_header_value(value: str) -> str:
