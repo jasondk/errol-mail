@@ -1,0 +1,7 @@
+# Apple Mail MCP Server Dependencies
+
+# MCP server framework
+mcp>=1.0.0
+
+# Standard library only for core functionality
+# sqlite3, email, pathlib are all built-in

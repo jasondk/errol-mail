@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""
+Apple Mail Email Reader
+
+Parse .emlx files and extract email content, headers, and attachment metadata.
+"""
+
+import email
+import email.policy
+from email.header import decode_header
+from pathlib import Path
+from typing import Dict, Optional, Any, List
+import re
+import os
+
+
+def decode_header_value(value: str) -> str:
+    """
+    Decode encoded email header values (e.g. =?utf-8?B?...?=)
+
+    Args:
+        value: Encoded header value
+
+    Returns:
+        Decoded string
+    """
+    if not value:
+        return ""
+
+    decoded_parts = []
+    for content, encoding in decode_header(value):
+        if isinstance(content, bytes):
+            if encoding:
+                try:
+                    decoded_parts.append(content.decode(encoding))
+                except (LookupError, UnicodeDecodeError):
+                    decoded_parts.append(content.decode('utf-8', errors='replace'))
+            else:
+                decoded_parts.append(content.decode('utf-8', errors='replace'))
+        else:
+            decoded_parts.append(str(content))
+
+    return ''.join(decoded_parts)
+
+
+class QuoteStripper:
+    """Intelligently strip quoted content from emails for thread reading"""
+
+    # Quote markers (ordered by priority)
+    QUOTE_PATTERNS = [
+        (r'^>+\s?', 'prefix'),              # > quoted lines
+        (r'^On .+wrote:$', 'header'),       # "On ... wrote:"
+        (r'^On .+:$', 'header'),             # "On ...:"
+        (r'^\d{4}年\d{1,2}月\d{1,2}日.+写道：', 'header'),  # Chinese
+        (r'^From:\s', 'forward'),           # Forward markers
+        (r'^Sent:\s', 'forward'),
+        (r'^-{5,}\s*Original Message\s*-{5,}', 'separator'),
+        (r'^_{10,}', 'separator'),
+        (r'^={10,}', 'separator'),
+    ]
+
+    def __init__(self, keep_quote_lines: int = 5):
+        """
+        Initialize quote stripper
+
+        Args:
+            keep_quote_lines: Number of lines to keep from each quote block
+        """
+        self.keep_quote_lines = keep_quote_lines
+        self.compiled_patterns = [
+            (re.compile(pattern, re.MULTILINE | re.IGNORECASE), ptype)
+            for pattern, ptype in self.QUOTE_PATTERNS
+        ]
+
+    def _is_quote_line(self, line: str) -> bool:
+        """Check if a line is part of a quote"""
+        stripped = line.strip()
+        if not stripped:
+            return False
+
+        for pattern, _ in self.compiled_patterns:
+            if pattern.match(line):
+                return True
+
+        return False
+
+    def strip_quotes(self, text: str, max_length: int = 0) -> tuple:
+        """
+        Strip redundant quotes from email text
+
+        Args:
+            text: Email body text
+            max_length: Maximum total length (0 = unlimited)
+
+        Returns:
+            Tuple of (stripped_text, metadata)
+        """
+        if not text:
+            return text, {}
+
+        original_length = len(text)
+        lines = text.split('\n')
+        result_lines = []
+        in_quote_block = False
+        quote_block_lines = 0
+        quotes_stripped = 0
+
+        for line in lines:
+            is_quote = self._is_quote_line(line)
+
+            if is_quote:
+                if not in_quote_block:
+                    # Starting a new quote block
+                    in_quote_block = True
+                    quote_block_lines = 0
+
+                quote_block_lines += 1
+
+                if quote_block_lines <= self.keep_quote_lines:
+                    result_lines.append(line)
+                else:
+                    quotes_stripped += 1
+            else:
+                if in_quote_block and quotes_stripped > 0:
+                    # End of quote block, add marker
+                    result_lines.append(f'[... {quotes_stripped} quoted lines omitted ...]')
+                    quotes_stripped = 0
+
+                in_quote_block = False
+                quote_block_lines = 0
+                result_lines.append(line)
+
+        # Handle trailing quote block
+        if in_quote_block and quotes_stripped > 0:
+            result_lines.append(f'[... {quotes_stripped} quoted lines omitted ...]')
+
+        result = '\n'.join(result_lines)
+
+        # Apply hard limit if needed
+        hard_truncated = False
+        if max_length > 0 and len(result) > max_length:
+            result = result[:max_length] + '\n[... content truncated ...]'
+            hard_truncated = True
+
+        metadata = {
+            'original_length': original_length,
+            'stripped_length': len(result),
+            'hard_truncated': hard_truncated
+        }
+
+        return result, metadata
+
+
+def parse_emlx_file(
+    file_path: str,
+    max_body_length: int = 0,
+    strip_quotes: bool = False
+) -> Dict[str, Any]:
+    """
+    Parse .emlx file and extract email content
+
+    Args:
+        file_path: Absolute path to .emlx file
+        max_body_length: Maximum body length in characters (0 = unlimited, default 10000)
+        strip_quotes: Enable smart quote stripping for thread reading
+
+    Returns:
+        Dictionary containing email information:
+        {
+            "success": True/False,
+            "message_id": "...",
+            "subject": "...",
+            "from": "...",
+            "to": "...",
+            "cc": "...",
+            "date": "...",
+            "body_text": "email body",
+            "body_html": "html body if available",
+            "attachments": [
+                {
+                    "filename": "...",
+                    "mime_type": "...",
+                    "size_bytes": 12345
+                }
+            ],
+            "truncated": True/False,
+            "error": "..." (if failed)
+        }
+    """
+    file_path_obj = Path(file_path)
+
+    if not file_path_obj.exists():
+        return {
+            "success": False,
+            "error": f"File not found: {file_path}"
+        }
+
+    # Default max body length
+    if max_body_length == 0:
+        max_body_length = int(os.environ.get('MAIL_MAX_BODY_LENGTH', '10000'))
+
+    try:
+        # Read email content
+        with open(file_path_obj, 'rb') as f:
+            lines = f.readlines()
+
+        # .emlx file format:
+        # First line: file size
+        # Second line onwards: raw email content
+        # Last few lines: Apple plist metadata (XML)
+
+        if len(lines) < 2:
+            return {
+                "success": False,
+                "error": "Invalid file format or empty file"
+            }
+
+        # From second line, find plist start position
+        email_lines = []
+        for line in lines[1:]:  # Skip first line (size)
+            line_str = line.decode('utf-8', errors='ignore')
+            # Detect plist start marker
+            if '<?xml version' in line_str or '<!DOCTYPE plist' in line_str or '<plist version' in line_str:
+                break
+            email_lines.append(line)
+
+        raw_content = b''.join(email_lines)
+
+        # Parse email
+        msg = email.message_from_bytes(raw_content, policy=email.policy.compat32)
+
+        # Extract headers
+        message_id = msg.get('Message-Id', '')
+        subject = decode_header_value(msg.get('Subject', ''))
+        from_addr = decode_header_value(msg.get('From', ''))
+        to_addr = decode_header_value(msg.get('To', ''))
+        cc_addr = decode_header_value(msg.get('Cc', ''))
+        date = msg.get('Date', '')
+
+        # Threading headers
+        references = msg.get('References', '')
+        in_reply_to = msg.get('In-Reply-To', '')
+
+        # Extract attachments metadata and body
+        attachments = []
+        body_text = ""
+        body_html = ""
+
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get('Content-Disposition', ''))
+
+                # Check for attachment
+                is_attachment = (
+                    'attachment' in content_disposition or
+                    (part.get_filename() and content_type not in ['text/plain', 'text/html'])
+                )
+
+                if is_attachment:
+                    filename = part.get_filename()
+                    if filename:
+                        filename = decode_header_value(filename)
+                        payload = part.get_payload(decode=True)
+                        size_bytes = len(payload) if payload else 0
+
+                        attachments.append({
+                            "filename": filename,
+                            "mime_type": content_type,
+                            "size_bytes": size_bytes
+                        })
+
+                elif content_type == 'text/plain' and not body_text:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        try:
+                            body_text = payload.decode(charset)
+                        except (UnicodeDecodeError, LookupError):
+                            body_text = payload.decode('utf-8', errors='replace')
+
+                elif content_type == 'text/html' and not body_html:
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        try:
+                            body_html = payload.decode(charset)
+                        except (UnicodeDecodeError, LookupError):
+                            body_html = payload.decode('utf-8', errors='replace')
+        else:
+            # Single part email
+            content_type = msg.get_content_type()
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or 'utf-8'
+                try:
+                    decoded = payload.decode(charset)
+                except (UnicodeDecodeError, LookupError):
+                    decoded = payload.decode('utf-8', errors='replace')
+
+                if content_type == 'text/html':
+                    body_html = decoded
+                else:
+                    body_text = decoded
+
+        # Process body text
+        body_text = body_text.strip()
+        original_length = len(body_text)
+        truncated = False
+
+        # Strip quotes if requested
+        if strip_quotes and body_text:
+            stripper = QuoteStripper(keep_quote_lines=5)
+            body_text, quote_meta = stripper.strip_quotes(body_text, max_length=max_body_length)
+            truncated = quote_meta.get('hard_truncated', False)
+        elif max_body_length > 0 and original_length > max_body_length:
+            body_text = body_text[:max_body_length] + '\n[... content truncated ...]'
+            truncated = True
+
+        result = {
+            "success": True,
+            "message_id": message_id,
+            "subject": subject,
+            "from": from_addr,
+            "to": to_addr,
+            "cc": cc_addr,
+            "date": date,
+            "references": references,
+            "in_reply_to": in_reply_to,
+            "body_text": body_text,
+            "attachments": attachments
+        }
+
+        if body_html:
+            result["body_html"] = body_html if len(body_html) < max_body_length else body_html[:max_body_length]
+
+        if truncated:
+            result["truncated"] = True
+            result["original_length"] = original_length
+
+        return result
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Parse failed: {str(e)}"
+        }
+
+
+def main():
+    """CLI test tool"""
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python email_reader.py <emlx_file_path>")
+        sys.exit(1)
+
+    file_path = sys.argv[1]
+    print(f"Parsing: {file_path}\n")
+
+    result = parse_emlx_file(file_path)
+
+    if result['success']:
+        print(f"Subject: {result['subject']}")
+        print(f"From: {result['from']}")
+        print(f"To: {result['to']}")
+        print(f"Date: {result['date']}")
+        print(f"Message-ID: {result['message_id']}")
+
+        if result['attachments']:
+            print(f"\nAttachments ({len(result['attachments'])}):")
+            for att in result['attachments']:
+                print(f"  - {att['filename']} ({att['mime_type']}, {att['size_bytes']} bytes)")
+
+        print(f"\nBody:\n{'-' * 60}")
+        print(result['body_text'])
+    else:
+        print(f"Error: {result['error']}")
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
