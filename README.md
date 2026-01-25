@@ -54,11 +54,22 @@ An MCP (Model Context Protocol) server that provides AI assistants with comprehe
 
 ### 2. Grant Full Disk Access
 
-The MCP server reads Mail's database, which requires Full Disk Access:
+The MCP server reads Mail's database, which requires Full Disk Access. Open **System Settings** → **Privacy & Security** → **Full Disk Access**, then add the relevant apps:
 
-1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-2. Click **+** and add your terminal (Terminal.app, iTerm2, etc.)
-3. Restart your terminal
+| Use Case | What to Add |
+|----------|-------------|
+| Running from terminal | Your terminal app (Terminal.app, iTerm2, etc.) |
+| Claude Desktop | Claude.app AND possibly Python Launcher.app* |
+| Claude Code | Your terminal app |
+
+*\*Python Launcher.app is included with the [python.org installer](https://www.python.org/downloads/) and may be required if that's how Python is installed. It's typically found in `/Applications/Python 3.x/`.*
+
+**Tip:** If you get "cannot access Mail database" errors, try adding the Python interpreter directly:
+- Homebrew: `/opt/homebrew/bin/python3`
+- System: `/usr/bin/python3`
+- python.org: `/Library/Frameworks/Python.framework/Versions/3.x/bin/python3`
+
+After adding, restart the app that needs access.
 
 ### 3. Install
 
