@@ -240,7 +240,7 @@ class MailDatabase:
 
         URL formats:
         - imap://ACCOUNT-UUID/INBOX
-        - imap://ACCOUNT-UUID/INBOX/_BMB-Grad
+        - imap://ACCOUNT-UUID/INBOX/Projects
         - ews://ACCOUNT-UUID/INBOX/Subfolder
         """
         import urllib.parse

@@ -179,7 +179,7 @@ def get_folder_messages(
     Get messages from a specific folder.
 
     Args:
-        folder_name: Folder name to search for (partial match, e.g. "BMB-Grad")
+        folder_name: Folder name to search for (partial match, e.g. "Projects")
         limit: Maximum number of messages (default: 20)
         unread_only: Only return unread messages (default: False)
 
@@ -1288,8 +1288,8 @@ def main():
         print("\n1. List Flag Colors:")
         print(list_flag_colors())
 
-        print("\n2. Find BMB-Grad mailbox:")
-        print(find_mailbox("BMB-Grad"))
+        print("\n2. Find Inbox mailbox:")
+        print(find_mailbox("Inbox"))
 
         print("\n3. Recent messages (5):")
         print(get_recent_messages(limit=5))

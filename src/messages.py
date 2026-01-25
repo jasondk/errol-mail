@@ -135,7 +135,7 @@ class MessageQuery:
         Get messages from a folder by name.
 
         Args:
-            folder_name: Folder name to search for (e.g., "_BMB-Grad")
+            folder_name: Folder name to search for (e.g., "Projects")
             limit: Maximum number of messages
             include_read: Whether to include read messages
 

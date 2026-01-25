@@ -4,9 +4,9 @@ Apple Mail CLI - Command line interface for Apple Mail database access.
 
 Usage:
     python mail_cli.py mailboxes              # List all mailboxes
-    python mail_cli.py find BMB-Grad          # Find mailboxes by name
+    python mail_cli.py find Projects          # Find mailboxes by name
     python mail_cli.py recent                 # List recent messages
-    python mail_cli.py folder "_BMB-Grad"     # List messages in folder
+    python mail_cli.py folder "Projects"      # List messages in folder
     python mail_cli.py unread                 # List unread messages
     python mail_cli.py search --subject "test" --days 7
 
