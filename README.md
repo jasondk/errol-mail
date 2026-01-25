@@ -10,7 +10,9 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-An MCP (Model Context Protocol) server that provides AI assistants with comprehensive access to Apple Mail. Like Errol delivering letters to the Burrow, this tool fetches your emails for Claude-though possibly with fewer crash landings (???)
+<p align="center"><em>Named after the Weasley family's loyal (if clumsy) owl from Harry Potter</em></p>
+
+An MCP server that gives Claude comprehensive access to Apple Mail—not just reading, but **managing** your inbox. Search emails, read threads, triage messages by setting flags and read status, and even fetch old emails from the server that aren't downloaded locally. All message modifications run **headlessly** via AppleScript, so Claude can organize your inbox without Mail windows popping up everywhere.
 
 ## Features
 
@@ -33,15 +35,17 @@ An MCP (Model Context Protocol) server that provides AI assistants with comprehe
 - **Batch extract** - Get all attachments at once
 - **Auto cleanup** - Remove old extracted files
 
-### ✏️ Message Management (Headless)
-- **Read/unread status** - Mark messages without opening Mail
-- **Flag colors** - Set/clear flags programmatically
-- **Server sync** - Changes sync to IMAP/Exchange
+### ✏️ Message Management (Headless via AppleScript)
+- **Read/unread status** - Mark messages without opening Mail windows
+- **Flag colors** - Set any of 7 flag colors programmatically
+- **Fully headless** - All operations run silently in the background
+- **Server sync** - Changes automatically sync to IMAP/Exchange
 
-### 📡 Server-Side Messages
-- **Availability check** - Detect server-only emails
-- **Silent download** - Fetch emails without UI disruption
-- **Window cleanup** - Close message windows after batch ops
+### 📡 Server-Side Message Retrieval
+- **Availability check** - Detect if emails exist only on server (not downloaded)
+- **On-demand download** - Fetch old emails from the server when needed
+- **Silent download** - Download emails and auto-close windows for batch operations
+- **Access your entire archive** - Read emails from years ago that aren't stored locally
 
 ## Quick Start
 
@@ -221,6 +225,16 @@ python server.py --test
 ```
 "Check if message 279406 is downloaded"
 "Download old emails from 2020 silently"
+"Find and download all emails from 2019 about the merger"
+```
+
+### Automate email triage (headless)
+
+```
+"Mark all newsletters from today as read"
+"Flag all emails from my boss as red"
+"Go through my unread emails: flag urgent ones red, mark FYIs as read"
+"Clear the flags on all green-flagged messages older than a week"
 ```
 
 ## Claude Skill
@@ -297,10 +311,21 @@ Apple Mail stores metadata in `~/Library/Mail/V10/MailData/Envelope Index` (SQLi
 Full email content is stored as `.emlx` files in nested directories under `~/Library/Mail/V10/`. The MCP server locates and parses these files on demand.
 
 ### AppleScript Integration
-For operations requiring Mail.app interaction (downloads, flag changes), the server uses AppleScript. Most operations run headless without disrupting the UI.
+Errol uses AppleScript to interact with Mail.app for operations that go beyond database reads:
+
+- **Headless modifications** - Setting flags and read status runs completely in the background with no windows or UI disruption
+- **Server downloads** - Triggering Mail to fetch emails from the server, with automatic window cleanup
+- **Window management** - Closing message windows and minimizing Mail after batch operations
+
+This means Claude can triage your inbox (flagging, marking read/unread) without you seeing Mail pop up constantly.
 
 ### Server-Only Messages
-Older emails may exist in the database but not be downloaded locally. The server can detect these and trigger downloads via AppleScript.
+IMAP and Exchange accounts often have years of email on the server that isn't downloaded locally. Errol can:
+1. Detect which messages are server-only (metadata exists but no local file)
+2. Trigger Mail.app to download them on demand
+3. Auto-close the download window to keep things tidy
+
+This lets you search and access your entire email archive, not just recently synced messages.
 
 ## Limitations
 
