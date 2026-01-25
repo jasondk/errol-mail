@@ -1229,10 +1229,13 @@ def _find_email_file(message_rowid: int, mailbox_url: str) -> Optional[str]:
 def _format_messages(messages: list, title: str) -> str:
     """Format a list of messages as markdown"""
     lines = [f"# {title}\n"]
-    lines.append("| Status | Date | From | Subject |")
-    lines.append("|--------|------|------|---------|")
+    lines.append("| ID | Status | Date | From | Subject |")
+    lines.append("|---:|--------|------|------|---------|")
 
     for msg in messages:
+        # Message ID (needed for read_email, read_thread, etc.)
+        msg_id = msg.get("message_id", "?")
+
         # Status indicators
         read_icon = "📧" if msg.get("is_read", True) else "📬"
 
@@ -1260,10 +1263,10 @@ def _format_messages(messages: list, title: str) -> str:
 
         # Subject
         subject = str(msg.get("subject") or "(No subject)")
-        if len(subject) > 45:
-            subject = subject[:42] + "..."
+        if len(subject) > 40:
+            subject = subject[:37] + "..."
 
-        lines.append(f"| {status} | {date_str} | {sender} | {subject} |")
+        lines.append(f"| {msg_id} | {status} | {date_str} | {sender} | {subject} |")
 
     return "\n".join(lines)
 
