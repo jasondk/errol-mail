@@ -10,8 +10,6 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center"><strong>NOTE: This is an IN-PROGRESS project and is still in testing. All features may not yet be working.</strong></p>
-
 An MCP (Model Context Protocol) server that provides AI assistants with comprehensive access to Apple Mail. Like Errol delivering letters to the Burrow, this tool fetches your emails for Claude-though possibly with fewer crash landings (???)
 
 ## Features
