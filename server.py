@@ -338,6 +338,16 @@ def get_flagged_messages(
         if not rows:
             if flag_color_filter:
                 label = format_flag(flag_color_filter)
+                # Show what colors ARE in the database to help diagnose
+                with db.connection() as conn2:
+                    diag = conn2.execute('''
+                        SELECT flag_color, COUNT(*) as cnt
+                        FROM messages WHERE flagged = 1
+                        GROUP BY flag_color ORDER BY cnt DESC
+                    ''').fetchall()
+                if diag:
+                    available = ", ".join([f"{format_flag(r[0])} ({r[1]})" for r in diag])
+                    return f"No {label} flagged messages found.\n\nFlags in database: {available}\n\n*Note: Mail.app may store all flags with color=1 (red) internally. Try `get_flagged_messages()` without a color filter to see all flagged messages.*"
                 return f"No {label} flagged messages found"
             return "No flagged messages found"
 
@@ -387,19 +397,35 @@ def list_flag_colors() -> str:
     """
     try:
         flag_names = get_flag_names()
+        db = MailDatabase()
+
+        # Check what flag colors actually exist in the database
+        with db.connection() as conn:
+            cursor = conn.execute('''
+                SELECT flag_color, COUNT(*) as cnt
+                FROM messages WHERE flagged = 1
+                GROUP BY flag_color ORDER BY flag_color
+            ''')
+            db_colors = {row[0]: row[1] for row in cursor.fetchall()}
 
         lines = ["# Your Flag Colors\n"]
-        lines.append("| Emoji | Color | Your Label |")
-        lines.append("|-------|-------|------------|")
+        lines.append("| Emoji | Color | Your Label | In Database |")
+        lines.append("|-------|-------|------------|-------------|")
 
         for fc in range(1, 8):
             emoji = FLAG_EMOJIS.get(fc, "")
             color = DEFAULT_FLAG_COLORS.get(fc, f"Color {fc}")
             name = flag_names.get(fc, color)
-            lines.append(f"| {emoji} | {color} | {name} |")
+            count = db_colors.get(fc, 0)
+            count_str = f"{count} msgs" if count > 0 else "-"
+            lines.append(f"| {emoji} | {color} | {name} | {count_str} |")
 
         lines.append("")
-        lines.append("*Use the color name or your custom label when filtering flagged messages*")
+        if len(db_colors) == 1 and 1 in db_colors:
+            lines.append("*Note: Mail.app appears to store all flags with color=1 (Red) internally.*")
+            lines.append("*Color filtering may not work as expected. Use `get_flagged_messages()` to see all.*")
+        else:
+            lines.append("*Use the color name or your custom label when filtering flagged messages*")
 
         return "\n".join(lines)
 
