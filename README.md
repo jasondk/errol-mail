@@ -10,9 +10,9 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center"><em>Named after the Weasley family's loyal (if clumsy) owl from Harry Potter</em></p>
+<p align="center"><em>NOTE: This is an IN-PROGRESS project and is still in testing. All features may not yet be working.</em></p>
 
-An MCP (Model Context Protocol) server that provides AI assistants with comprehensive access to Apple Mail. Like Errol delivering letters to the Burrow, this tool fetches your emails for Claude—though with considerably fewer crash landings.
+An MCP (Model Context Protocol) server that provides AI assistants with comprehensive access to Apple Mail. Like Errol delivering letters to the Burrow, this tool fetches your emails for Claude-though possibly with fewer crash landings (???)
 
 ## Features
 
