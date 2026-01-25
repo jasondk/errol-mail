@@ -197,18 +197,10 @@ A Claude Code skill is included that teaches Claude how to effectively use Errol
 
 ### Installing the Skill
 
-**Option 1: Copy the skill folder**
+From the errol-mail directory, run:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r skill ~/.claude/skills/errol
-```
-
-**Option 2: Extract from .skill package**
-
-```bash
-mkdir -p ~/.claude/skills
-unzip errol.skill -d ~/.claude/skills/errol
+mkdir -p ~/.claude/skills/errol && unzip -o errol.skill -d ~/.claude/skills/errol
 ```
 
 ### Skill Contents
