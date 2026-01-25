@@ -53,22 +53,35 @@ An MCP (Model Context Protocol) server that provides AI assistants with comprehe
 
 ### 2. Grant Full Disk Access
 
-The MCP server reads Mail's database, which requires Full Disk Access. Open **System Settings** → **Privacy & Security** → **Full Disk Access**, then add the relevant apps:
+Errol reads Mail's database, which requires Full Disk Access. Run the diagnostic script to check your setup:
 
-| Use Case | What to Add |
-|----------|-------------|
-| Running from terminal | Your terminal app (Terminal.app, iTerm2, etc.) |
-| Claude Desktop | Claude.app AND possibly Python Launcher.app* |
-| Claude Code | Your terminal app |
+```bash
+python3 check_fda.py
+```
 
-*\*Python Launcher.app is included with the [python.org installer](https://www.python.org/downloads/) and may be required if that's how Python is installed. It's typically found in `/Applications/Python 3.x/`.*
+If access is working, you'll see:
+```
+✅ Successfully accessed Mail database (12,345 messages)
+```
 
-**Tip:** If you get "cannot access Mail database" errors, try adding the Python interpreter directly:
-- Homebrew: `/opt/homebrew/bin/python3`
-- System: `/usr/bin/python3`
-- python.org: `/Library/Frameworks/Python.framework/Versions/3.x/bin/python3`
+If not, the script tells you **exactly what path to add** to Full Disk Access. This is important because:
+- macOS permissions apply to the *actual binary*, not symlinks
+- Homebrew Python uses wrapper scripts that point to `Python.app`
+- MCP hosts spawn Python as a child process, so adding the host app isn't enough
 
-After adding, restart the app that needs access.
+The script handles all of this and gives you the precise path to add.
+
+<details>
+<summary><b>Manual Setup (if you prefer)</b></summary>
+
+1. Open **System Settings → Privacy & Security → Full Disk Access**
+2. Click **+** and add:
+   - **Terminal users**: Your terminal app (Terminal.app, iTerm2, Warp)
+   - **Homebrew Python**: The `Python.app` inside Cellar (run `check_fda.py` to find it)
+   - **System Python**: `/usr/bin/python3`
+3. Restart your terminal or MCP client
+
+</details>
 
 ### 3. Install
 
@@ -313,6 +326,68 @@ Inspired by [fatbobman/mail-mcp-bridge](https://github.com/fatbobman/mail-mcp-br
 | Silent downloads | ✗ | ✓ |
 | Window management | ✗ | ✓ |
 | Claude skill | ✗ | ✓ |
+
+## Troubleshooting
+
+### "Cannot access Mail database" errors
+
+Run the diagnostic script first:
+```bash
+python3 check_fda.py
+```
+
+If it works in terminal but fails in Claude Desktop, the MCP host is spawning a different Python than the one you tested.
+
+<details>
+<summary><b>Why Full Disk Access is tricky with MCP servers</b></summary>
+
+macOS FDA permissions are checked on the **exact binary that executes**, not on:
+- Parent processes that spawn it
+- Symlinks pointing to it
+- App bundles (unless launched via Finder)
+
+When Claude Desktop runs your MCP server:
+```
+Claude Desktop → spawns → Python → runs errol
+```
+
+FDA on Claude Desktop doesn't help Python. You need FDA on the actual Python binary.
+
+**Homebrew Python** adds complexity: `/opt/homebrew/bin/python3` is a symlink → to a wrapper → that launches `Python.app`. FDA must be on that final `Python.app`.
+
+The `check_fda.py` script finds this path for you.
+
+</details>
+
+<details>
+<summary><b>Common pitfalls</b></summary>
+
+| What you tried | Why it doesn't work |
+|----------------|---------------------|
+| Added `/opt/homebrew/bin/python3` | That's a symlink, not the binary |
+| Added Claude.app | FDA doesn't propagate to child processes |
+| Added your venv's python | venv python is a symlink to the real binary |
+
+</details>
+
+<details>
+<summary><b>Still stuck?</b></summary>
+
+1. **Check which Python is actually running:**
+   ```bash
+   ps aux | grep -i errol
+   ```
+   The binary shown must be in your FDA list.
+
+2. **Check MCP logs:**
+   ```bash
+   # Claude Desktop logs:
+   cat ~/Library/Logs/Claude/mcp*.log | grep -i errol
+   ```
+
+3. **Open an issue** on the GitHub repo with the output of `check_fda.py` and we'll help debug.
+
+</details>
 
 ## Contributing
 
