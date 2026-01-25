@@ -63,7 +63,7 @@ The MCP server reads Mail's database, which requires Full Disk Access:
 ### 3. Install
 
 ```bash
-git clone https://github.com/yourusername/errol-mail.git
+git clone https://github.com/jasondk/errol-mail.git
 cd errol-mail
 pip install -r requirements.txt
 ```
