@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="errol.png" alt="Errol-Mail Logo" width="400">
+  <img src="errol.png" alt="Errol-Mail Logo" width="600">
 </p>
 
 <h1 align="center">Errol-Mail</h1>
