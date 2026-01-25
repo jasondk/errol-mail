@@ -45,3 +45,7 @@ env/
 
 # Extracted attachments (auto-generated)
 extracted_attachments/
+
+# Local documentation and tools
+docs/
+tools/
