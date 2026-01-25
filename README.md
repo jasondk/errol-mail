@@ -18,7 +18,8 @@ An MCP (Model Context Protocol) server that provides AI assistants with comprehe
 - **Browse mailboxes** - List all folders across all accounts
 - **Search messages** - Filter by subject, sender, date range
 - **Unread/flagged** - Quick access to messages needing attention
-- **Custom flag labels** - Respects your Mail.app flag customizations
+- **7 flag colors** - Filter by red, orange, yellow, green, blue, purple, gray
+- **Custom flag labels** - Use your Mail.app names ("Action needed", "Waiting")
 
 ### 📖 Email Reading
 - **Full content** - Read complete emails with headers and body
@@ -123,7 +124,7 @@ python server.py --test
 | `get_unread_messages(limit)` | Unread messages only |
 | `get_folder_messages(folder, limit)` | Messages in specific folder |
 | `search_messages(subject, sender, days_back)` | Search with filters |
-| `get_flagged_messages(color, folder)` | Flagged messages |
+| `get_flagged_messages(color, folder)` | Filter by any of 7 flag colors |
 
 ### Reading Tools
 
@@ -184,6 +185,15 @@ python server.py --test
 "Read the thread about the budget proposal"
 "Summarize the conversation with the marketing team"
 "Mark message 698914 as read and flag it red"
+```
+
+### Work with flagged messages
+
+```
+"Show me all my red-flagged action items"
+"What orange messages am I waiting on?"
+"Flag this email blue for reference"
+"List flag colors to see my custom labels"
 ```
 
 ### Process attachments
