@@ -146,6 +146,7 @@ python server.py --test
 | Tool | Description |
 |------|-------------|
 | `read_email(message_id)` | Full email content |
+| `read_emails_batch(message_ids)` | Read multiple emails in parallel (up to 20) |
 | `read_thread(message_id)` | Entire conversation |
 | `get_thread_summary(message_id)` | Thread overview |
 

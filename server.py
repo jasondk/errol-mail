@@ -14,8 +14,9 @@ Requires Full Disk Access permission in System Settings.
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -508,6 +509,140 @@ def read_email(message_id: int, max_body_length: int = 10000) -> str:
 
     except Exception as e:
         return f"Error reading email: {e}"
+
+
+@mcp.tool()
+def read_emails_batch(
+    message_ids: List[int],
+    max_body_length: int = 5000
+) -> str:
+    """
+    Read multiple emails at once by their database message IDs.
+
+    More efficient than calling read_email() multiple times when you need
+    to read several emails. Files are parsed in parallel for better performance.
+
+    Args:
+        message_ids: List of database ROWIDs to read (max 20)
+        max_body_length: Maximum body length per email (default: 5000 chars)
+
+    Returns a combined result with all emails, each clearly separated.
+    """
+    if not message_ids:
+        return "No message IDs provided"
+
+    if len(message_ids) > 20:
+        return "Maximum 20 messages per batch. Please split into smaller batches."
+
+    try:
+        db = MailDatabase()
+
+        # Single SQL query for all messages
+        placeholders = ",".join("?" * len(message_ids))
+        with db.connection() as conn:
+            cursor = conn.execute(f"""
+                SELECT
+                    m.ROWID as message_id,
+                    m.subject_prefix,
+                    subj.subject as subject_text,
+                    m.date_received,
+                    mb.url as mailbox_url
+                FROM messages m
+                LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
+                LEFT JOIN subjects subj ON m.subject = subj.ROWID
+                WHERE m.ROWID IN ({placeholders})
+            """, message_ids)
+
+            rows = cursor.fetchall()
+
+        if not rows:
+            return "No messages found for the provided IDs"
+
+        # Build lookup for mailbox URLs
+        message_info = {row["message_id"]: row for row in rows}
+
+        # Find missing IDs
+        found_ids = set(message_info.keys())
+        missing_ids = [mid for mid in message_ids if mid not in found_ids]
+
+        # Function to read a single email (for parallel execution)
+        def read_single(msg_id: int) -> dict:
+            info = message_info.get(msg_id)
+            if not info:
+                return {"message_id": msg_id, "error": "Not found"}
+
+            file_path = _find_email_file(msg_id, info["mailbox_url"])
+            if not file_path:
+                return {"message_id": msg_id, "error": "File not found (may be server-only)"}
+
+            result = parse_emlx_file(file_path, max_body_length=max_body_length)
+            if not result["success"]:
+                return {"message_id": msg_id, "error": result.get("error", "Parse failed")}
+
+            return {
+                "message_id": msg_id,
+                "success": True,
+                "data": result
+            }
+
+        # Read all emails in parallel
+        results = {}
+        with ThreadPoolExecutor(max_workers=min(len(message_ids), 8)) as executor:
+            futures = {executor.submit(read_single, mid): mid for mid in message_ids if mid in found_ids}
+            for future in as_completed(futures):
+                msg_id = futures[future]
+                try:
+                    results[msg_id] = future.result()
+                except Exception as e:
+                    results[msg_id] = {"message_id": msg_id, "error": str(e)}
+
+        # Format output - maintain original order
+        output_lines = [f"# Batch Read: {len(message_ids)} emails requested\n"]
+
+        success_count = sum(1 for r in results.values() if r.get("success"))
+        error_count = len(message_ids) - success_count
+        output_lines.append(f"**Results:** {success_count} read successfully, {error_count} failed\n")
+
+        for msg_id in message_ids:
+            output_lines.append("---")
+            output_lines.append("")
+
+            if msg_id in missing_ids:
+                output_lines.append(f"## Message {msg_id}")
+                output_lines.append(f"**Error:** Message not found in database\n")
+                continue
+
+            result = results.get(msg_id, {"error": "Unknown error"})
+
+            if result.get("success"):
+                data = result["data"]
+                output_lines.append(f"## Message {msg_id}")
+                output_lines.append(f"**From:** {data['from']}")
+                output_lines.append(f"**To:** {data['to']}")
+                if data.get('cc'):
+                    output_lines.append(f"**Cc:** {data['cc']}")
+                output_lines.append(f"**Date:** {data['date']}")
+                output_lines.append(f"**Subject:** {data['subject']}")
+
+                if data.get('attachments'):
+                    att_list = ", ".join([a['filename'] for a in data['attachments']])
+                    output_lines.append(f"**Attachments:** {att_list}")
+
+                output_lines.append("")
+                output_lines.append(data['body_text'])
+
+                if data.get('truncated'):
+                    output_lines.append(f"\n*[Body truncated at {max_body_length} characters]*")
+            else:
+                output_lines.append(f"## Message {msg_id}")
+                output_lines.append(f"**Error:** {result.get('error', 'Unknown error')}")
+
+            output_lines.append("")
+
+        return "\n".join(output_lines)
+
+    except Exception as e:
+        return f"Error in batch read: {e}"
 
 
 @mcp.tool()
