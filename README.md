@@ -10,7 +10,7 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-An MCP server that gives Claude comprehensive access to Apple Mail—not just reading, but **managing** your inbox. Search emails, read threads, triage messages by setting flags and read status, and even fetch old emails from the server that aren't downloaded locally. All message modifications run **headlessly** via AppleScript, so Claude can organize your inbox without Mail windows popping up everywhere.
+An MCP server that gives Claude comprehensive access to all of your email accounts in Apple Mail. Ask your AI assistant questions like "Do I have any new emails in my work inbox needing my attention?", "Read all of my emails flagged with an 'Attention needed' flag and summarize them in order of priority", and so on. Email content is retrieved rapidly in batches. Apple Mail's flag system with different colors and labels is fully supported. Read/unread status and flags can be updated automatically (using a headless AppleScript approach). Old messages that haven't been downloaded to the local database can even be triggered to be downloaded (using AppleScript). A Claude Skill is included, which can be easily customized so you can teach your AI assistant exactly what to do when you ask.
 
 ## Features
 
