@@ -326,8 +326,22 @@ class MessageQuery:
             params = []
 
             if sender_contains:
-                conditions.append("(sender_addr.address LIKE ? OR sender_addr.comment LIKE ?)")
-                params.extend([f"%{sender_contains}%", f"%{sender_contains}%"])
+                # Split search term into words for flexible matching
+                # "Justin MacDonald" should match "Justin A. MacDonald"
+                words = sender_contains.split()
+                if len(words) > 1:
+                    # Multiple words: require all words present in either field
+                    word_conditions = []
+                    for word in words:
+                        word_conditions.append(
+                            "(sender_addr.address LIKE ? OR sender_addr.comment LIKE ?)"
+                        )
+                        params.extend([f"%{word}%", f"%{word}%"])
+                    conditions.append("(" + " AND ".join(word_conditions) + ")")
+                else:
+                    # Single word: simple LIKE match
+                    conditions.append("(sender_addr.address LIKE ? OR sender_addr.comment LIKE ?)")
+                    params.extend([f"%{sender_contains}%", f"%{sender_contains}%"])
 
             if subject_contains:
                 conditions.append("subj.subject LIKE ?")
