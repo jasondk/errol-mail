@@ -208,6 +208,7 @@ def search_messages(
     subject: Optional[str] = None,
     sender: Optional[str] = None,
     days_back: Optional[int] = None,
+    folder: Optional[str] = None,
     limit: int = 50
 ) -> str:
     """
@@ -217,12 +218,13 @@ def search_messages(
         subject: Filter by subject (case-insensitive partial match)
         sender: Filter by sender email or name (case-insensitive partial match)
         days_back: Only search messages from the last N days
+        folder: Filter by folder/mailbox name (partial match, e.g., "Projects", "INBOX", "Sent")
         limit: Maximum results (default: 50)
 
     At least one filter should be provided. Returns matching messages sorted by date.
     """
-    if not any([subject, sender, days_back]):
-        return "Please provide at least one search filter (subject, sender, or days_back)"
+    if not any([subject, sender, days_back, folder]):
+        return "Please provide at least one search filter (subject, sender, days_back, or folder)"
 
     try:
         query = MessageQuery()
@@ -230,6 +232,7 @@ def search_messages(
             subject_contains=subject,
             sender_contains=sender,
             days_back=days_back,
+            folder=folder,
             limit=limit
         )
 

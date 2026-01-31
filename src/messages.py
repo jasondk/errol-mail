@@ -285,6 +285,7 @@ class MessageQuery:
         subject_contains: Optional[str] = None,
         sender_contains: Optional[str] = None,
         days_back: Optional[int] = None,
+        folder: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """
@@ -294,6 +295,7 @@ class MessageQuery:
             subject_contains: Filter by subject (case-insensitive)
             sender_contains: Filter by sender address (case-insensitive)
             days_back: Only include messages from the last N days
+            folder: Filter by folder name (partial match, e.g., "Projects" or "INBOX")
             limit: Maximum results
 
         Returns:
@@ -354,6 +356,11 @@ class MessageQuery:
                 cutoff_timestamp = cutoff.timestamp()
                 conditions.append("m.date_received >= ?")
                 params.append(cutoff_timestamp)
+
+            if folder:
+                # Filter by folder name (partial match on mailbox URL)
+                conditions.append("mb.url LIKE ?")
+                params.append(f"%{folder}%")
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
