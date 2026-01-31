@@ -3,6 +3,7 @@
 Apple Mail Email Reader
 
 Parse .emlx files and extract email content, headers, and attachment metadata.
+Includes security features for prompt injection detection.
 """
 
 import email
@@ -13,6 +14,64 @@ from typing import Dict, Optional, Any, List
 import plistlib
 import re
 import os
+
+
+# ============================================================================
+# SECURITY: Prompt Injection Detection
+# ============================================================================
+
+# Common prompt injection patterns to detect
+INJECTION_PATTERNS = [
+    (r'ignore\s+(all\s+)?(previous|prior|above|earlier)?\s*instructions?', 'Attempt to override instructions'),
+    (r'\[SYSTEM\]', 'Fake system message marker'),
+    (r'\[ADMIN\]', 'Fake admin message marker'),
+    (r'\[ASSISTANT\]', 'Fake assistant message marker'),
+    (r'<\s*system\s*>', 'Fake XML system tag'),
+    (r'you\s+are\s+now\s+(a\s+different|no\s+longer)', 'Attempt to change AI identity'),
+    (r'execute\s+(this|the\s+following)\s+(code|command|script)', 'Command execution request'),
+    (r'run\s+(this|the\s+following)\s+(code|command|script)', 'Command execution request'),
+    (r'(reveal|share|output|print|display)\s+(your|the)\s+(system\s+prompt|instructions|api\s+key|secret|password|credential)', 'Credential/prompt extraction attempt'),
+    (r'forget\s+(everything|all|what)\s+(you|about)', 'Memory manipulation attempt'),
+    (r'new\s+session|reset\s+context', 'Context reset attempt'),
+    (r'disregard\s+(all|any|previous)', 'Instruction override attempt'),
+    (r'pretend\s+(you\s+are|to\s+be|that)', 'Role-playing injection'),
+    (r"let's\s+play\s+a\s+game|roleplay\s+as", 'Jailbreak game attempt'),
+]
+
+# Compile patterns for efficiency
+_COMPILED_INJECTION_PATTERNS = [
+    (re.compile(pattern, re.IGNORECASE | re.MULTILINE), description)
+    for pattern, description in INJECTION_PATTERNS
+]
+
+
+def check_for_injection_patterns(text: str) -> List[str]:
+    """
+    Detect common prompt injection patterns in text.
+
+    This is a defense-in-depth measure. It won't catch all attacks,
+    but flags obvious attempts for human review.
+
+    Args:
+        text: Text to scan (typically email body)
+
+    Returns:
+        List of warning messages for detected patterns (empty if clean)
+    """
+    if not text:
+        return []
+
+    warnings = []
+    for pattern, description in _COMPILED_INJECTION_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            # Include a snippet of what was matched for context
+            snippet = match.group(0)[:50]
+            if len(match.group(0)) > 50:
+                snippet += "..."
+            warnings.append(f'{description}: "{snippet}"')
+
+    return warnings
 
 
 def get_emlx_flag_color(file_path: str) -> Optional[int]:
