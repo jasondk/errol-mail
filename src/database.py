@@ -42,15 +42,26 @@ FLAG_EMOJIS = {
     7: "⚪",
 }
 
+# Cache for flag names (loaded once, rarely changes)
+_FLAG_NAMES_CACHE: Optional[Dict[int, str]] = None
+
 
 def get_flag_names() -> Dict[int, str]:
     """
     Get user's custom flag names from Mail preferences.
 
+    Results are cached at module level since flag names rarely change.
+    Use clear_flag_names_cache() to force a refresh if needed.
+
     Returns:
         Dict mapping flag_color (1-7) to custom name.
         Falls back to default color names if preferences unavailable.
     """
+    global _FLAG_NAMES_CACHE
+
+    if _FLAG_NAMES_CACHE is not None:
+        return _FLAG_NAMES_CACHE
+
     try:
         # Read from Mail preferences using defaults command
         result = subprocess.run(
@@ -86,12 +97,20 @@ def get_flag_names() -> Dict[int, str]:
                 if fc not in names:
                     names[fc] = DEFAULT_FLAG_COLORS.get(fc, f"Flag {fc}")
 
+            _FLAG_NAMES_CACHE = names
             return names
     except Exception:
         pass
 
     # Return defaults if we couldn't read preferences
-    return DEFAULT_FLAG_COLORS.copy()
+    _FLAG_NAMES_CACHE = DEFAULT_FLAG_COLORS.copy()
+    return _FLAG_NAMES_CACHE
+
+
+def clear_flag_names_cache() -> None:
+    """Clear the flag names cache to force a refresh on next call."""
+    global _FLAG_NAMES_CACHE
+    _FLAG_NAMES_CACHE = None
 
 
 def format_flag(flag_color: Optional[int], include_emoji: bool = True) -> str:
