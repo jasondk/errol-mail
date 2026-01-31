@@ -12,6 +12,11 @@
 
 An MCP server that gives Claude comprehensive access to all of your email accounts in Apple Mail (via SQL, local file access, and AppleScript-only when needed). Ask your AI assistant questions like "Do I have any new emails in my work inbox needing my attention?", "Read all of my emails flagged with an 'Attention needed' flag and summarize them in order of priority", and so on. Email content is retrieved rapidly in batches. Apple Mail's flag system with different colors and labels is fully supported. Read/unread status and flags can be updated automatically (using a headless AppleScript approach). Old messages that haven't been downloaded to the local database can even be triggered to be downloaded (using AppleScript). A Claude Skill is included, which can be easily customized so you can teach your AI assistant exactly what to do when you ask.
 
+## Recent Additions
+
+- **Prompt Injection Defenses** - Email content is wrapped in isolation tags, scanned for injection patterns, and escaped to prevent attacks. See [Security](#security) for details.
+- **Performance Optimizations** - Faster email listings and parallel parsing for threads with multiple messages.
+
 ## Features
 
 ### 📬 Email Discovery
