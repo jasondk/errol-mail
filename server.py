@@ -13,10 +13,123 @@ Requires Full Disk Access permission in System Settings.
 """
 
 import sys
+import os
+import logging
+import time
+import functools
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Callable, Any
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+# ============================================================================
+# LOGGING SETUP
+# ============================================================================
+
+def setup_logging() -> logging.Logger:
+    """
+    Configure logging to file for debugging MCP server performance.
+
+    Logs to ~/Library/Logs/errol-mail/server.log
+    Uses stderr only if MCP_DEBUG env var is set (for development).
+    """
+    log_dir = Path.home() / "Library" / "Logs" / "errol-mail"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "server.log"
+
+    # Create logger
+    logger = logging.getLogger("errol-mail")
+
+    # Check if already configured (avoid duplicate handlers)
+    if logger.handlers:
+        return logger
+
+    # Prevent propagation to root logger (critical for MCP stdio mode)
+    logger.propagate = False
+
+    # Set level from environment or default to INFO
+    log_level = os.environ.get("ERROL_LOG_LEVEL", "INFO").upper()
+    logger.setLevel(getattr(logging, log_level, logging.INFO))
+
+    # File handler with rotation-friendly naming
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+
+    # Detailed format for debugging
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-7s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    # Log startup
+    logger.info("=" * 60)
+    logger.info("Errol Mail MCP Server starting")
+    logger.info(f"Log level: {log_level}")
+    logger.info(f"Log file: {log_file}")
+    logger.info("=" * 60)
+
+    return logger
+
+
+# Initialize logger at module load
+_logger = setup_logging()
+
+# Configure child loggers to inherit from parent
+logging.getLogger("errol-mail.database").setLevel(logging.DEBUG)
+logging.getLogger("errol-mail.applescript").setLevel(logging.DEBUG)
+
+
+def log_tool_call(func: Callable) -> Callable:
+    """
+    Decorator to log MCP tool calls with timing information.
+
+    Logs:
+    - Tool name and arguments at entry
+    - Execution time on completion
+    - Errors with full context
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        tool_name = func.__name__
+
+        # Format arguments for logging (truncate long values)
+        arg_strs = []
+        for k, v in kwargs.items():
+            v_str = str(v)
+            if len(v_str) > 100:
+                v_str = v_str[:100] + "..."
+            arg_strs.append(f"{k}={v_str}")
+        args_display = ", ".join(arg_strs) if arg_strs else "(no args)"
+
+        _logger.info(f"CALL {tool_name}({args_display})")
+        start_time = time.perf_counter()
+
+        try:
+            result = func(*args, **kwargs)
+            elapsed = time.perf_counter() - start_time
+
+            # Log result summary (truncated)
+            result_preview = str(result)[:200] if result else "(empty)"
+            if len(str(result)) > 200:
+                result_preview += "..."
+
+            if elapsed > 5.0:
+                _logger.warning(f"SLOW {tool_name} completed in {elapsed:.2f}s")
+            else:
+                _logger.info(f"DONE {tool_name} in {elapsed:.3f}s")
+            _logger.debug(f"RESULT {tool_name}: {result_preview}")
+
+            return result
+
+        except Exception as e:
+            elapsed = time.perf_counter() - start_time
+            _logger.error(f"FAIL {tool_name} after {elapsed:.3f}s: {type(e).__name__}: {e}")
+            raise
+
+    return wrapper
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
@@ -61,6 +174,7 @@ mcp = FastMCP("apple-mail")
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def list_mailboxes() -> str:
     """
     List all mailboxes (folders) in Apple Mail.
@@ -87,6 +201,7 @@ def list_mailboxes() -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def find_mailbox(search_term: str) -> str:
     """
     Find mailboxes by name.
@@ -124,6 +239,7 @@ def find_mailbox(search_term: str) -> str:
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def get_recent_messages(limit: int = 20, include_read: bool = True) -> str:
     """
     Get recent messages from all mailboxes.
@@ -148,6 +264,7 @@ def get_recent_messages(limit: int = 20, include_read: bool = True) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def get_unread_messages(limit: int = 20) -> str:
     """
     Get unread messages from all mailboxes.
@@ -171,6 +288,7 @@ def get_unread_messages(limit: int = 20) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def get_folder_messages(
     folder_name: str,
     limit: int = 20,
@@ -204,6 +322,7 @@ def get_folder_messages(
 
 
 @mcp.tool()
+@log_tool_call
 def search_messages(
     subject: Optional[str] = None,
     sender: Optional[str] = None,
@@ -260,6 +379,7 @@ def search_messages(
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def get_flagged_messages(
     color: Optional[str] = None,
     folder: Optional[str] = None,
@@ -394,6 +514,7 @@ def get_flagged_messages(
 
 
 @mcp.tool()
+@log_tool_call
 def list_flag_colors() -> str:
     """
     Show your custom flag color definitions.
@@ -449,6 +570,7 @@ def list_flag_colors() -> str:
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def read_email(message_id: int, max_body_length: int = 10000, check_injection: bool = True) -> str:
     """
     Read the full content of an email by its database message ID.
@@ -526,6 +648,7 @@ def read_email(message_id: int, max_body_length: int = 10000, check_injection: b
 
 
 @mcp.tool()
+@log_tool_call
 def read_emails_batch(
     message_ids: List[int],
     max_body_length: int = 5000,
@@ -688,6 +811,7 @@ def read_emails_batch(
 
 
 @mcp.tool()
+@log_tool_call
 def read_thread(
     message_id: int,
     max_body_length: int = 5000,
@@ -768,6 +892,7 @@ def read_thread(
 
 
 @mcp.tool()
+@log_tool_call
 def get_thread_summary(message_id: int) -> str:
     """
     Get a quick summary of an email thread without full message bodies.
@@ -816,6 +941,7 @@ def get_thread_summary(message_id: int) -> str:
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def list_attachments(message_id: int) -> str:
     """
     List all attachments in an email.
@@ -876,6 +1002,7 @@ def list_attachments(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def get_attachment(message_id: int, filename: str) -> str:
     """
     Extract an attachment from an email and save it to a temporary directory.
@@ -926,6 +1053,7 @@ def get_attachment(message_id: int, filename: str) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def extract_all_message_attachments(message_id: int) -> str:
     """
     Extract all attachments from an email.
@@ -987,6 +1115,7 @@ def extract_all_message_attachments(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def cleanup_attachments(older_than_hours: int = 24) -> str:
     """
     Clean up old extracted attachments to free disk space.
@@ -1017,6 +1146,7 @@ def cleanup_attachments(older_than_hours: int = 24) -> str:
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def check_email_availability(message_id: int) -> str:
     """
     Check if an email is available locally or only on the mail server.
@@ -1073,6 +1203,7 @@ def check_email_availability(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def download_email(message_id: int) -> str:
     """
     Trigger Mail.app to download a server-only email.
@@ -1125,6 +1256,7 @@ def download_email(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def open_email_in_mail(message_id: int) -> str:
     """
     Open an email in Apple Mail's viewer window.
@@ -1166,6 +1298,7 @@ def open_email_in_mail(message_id: int) -> str:
 # ============================================================================
 
 @mcp.tool()
+@log_tool_call
 def mark_email_read(message_id: int) -> str:
     """
     Mark an email as read (runs silently in background).
@@ -1203,6 +1336,7 @@ def mark_email_read(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def mark_email_unread(message_id: int) -> str:
     """
     Mark an email as unread (runs silently in background).
@@ -1240,6 +1374,7 @@ def mark_email_unread(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def set_email_flag(message_id: int, color: str) -> str:
     """
     Set a flag on an email (runs silently in background).
@@ -1280,6 +1415,7 @@ def set_email_flag(message_id: int, color: str) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def clear_email_flag(message_id: int) -> str:
     """
     Remove the flag from an email (runs silently in background).
@@ -1317,6 +1453,7 @@ def clear_email_flag(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def download_email_silent(message_id: int) -> str:
     """
     Download a server-only email silently (opens and closes window automatically).
@@ -1360,6 +1497,7 @@ def download_email_silent(message_id: int) -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def cleanup_mail_windows() -> str:
     """
     Close all open message windows in Mail.app (keeps main viewer).
@@ -1380,6 +1518,7 @@ def cleanup_mail_windows() -> str:
 
 
 @mcp.tool()
+@log_tool_call
 def minimize_mail_app() -> str:
     """
     Minimize all Mail.app windows to the dock.
@@ -1631,7 +1770,30 @@ def main():
 
     parser = argparse.ArgumentParser(description="Apple Mail MCP Server")
     parser.add_argument("--test", action="store_true", help="Run test commands")
+    parser.add_argument("--logs", action="store_true", help="Show recent log entries")
+    parser.add_argument("--tail", action="store_true", help="Follow log file in real-time")
     args = parser.parse_args()
+
+    log_file = Path.home() / "Library" / "Logs" / "errol-mail" / "server.log"
+
+    if args.logs:
+        # Show recent logs
+        if log_file.exists():
+            import subprocess
+            subprocess.run(["tail", "-50", str(log_file)])
+        else:
+            print(f"Log file not found: {log_file}")
+        return 0
+
+    if args.tail:
+        # Follow logs in real-time
+        if log_file.exists():
+            import subprocess
+            print(f"Following {log_file} (Ctrl+C to stop)...")
+            subprocess.run(["tail", "-f", str(log_file)])
+        else:
+            print(f"Log file not found: {log_file}")
+        return 0
 
     if args.test:
         # Test mode - run some commands directly

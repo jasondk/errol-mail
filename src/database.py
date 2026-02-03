@@ -9,9 +9,14 @@ Requires Full Disk Access permission in System Settings.
 import sqlite3
 import subprocess
 import plistlib
+import logging
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
+
+# Get logger from parent module
+_logger = logging.getLogger("errol-mail.database")
 
 
 # Mail database paths (V10 = macOS 12+)
@@ -171,6 +176,7 @@ class MailDatabase:
         Yields:
             sqlite3.Connection object
         """
+        start_time = time.perf_counter()
         try:
             # Use URI mode for read-only access
             conn = sqlite3.connect(
@@ -179,8 +185,15 @@ class MailDatabase:
                 timeout=10.0
             )
             conn.row_factory = sqlite3.Row  # Enable column access by name
+            connect_time = time.perf_counter() - start_time
+            if connect_time > 0.1:
+                _logger.warning(f"DB connect slow: {connect_time:.3f}s")
+            else:
+                _logger.debug(f"DB connected in {connect_time:.3f}s")
             yield conn
         except sqlite3.OperationalError as e:
+            elapsed = time.perf_counter() - start_time
+            _logger.error(f"DB connect failed after {elapsed:.3f}s: {e}")
             if "unable to open database file" in str(e):
                 raise MailDatabaseError(
                     "Cannot access Mail database. Please grant Full Disk Access:\n"

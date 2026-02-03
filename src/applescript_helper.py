@@ -7,20 +7,29 @@ such as triggering downloads of server-only messages.
 """
 
 import subprocess
+import logging
+import time
 from typing import Dict, Any, Optional
 
+# Get logger from parent module
+_logger = logging.getLogger("errol-mail.applescript")
 
-def run_applescript(script: str, timeout: int = 30) -> tuple[bool, str]:
+
+def run_applescript(script: str, timeout: int = 30, operation: str = "unknown") -> tuple[bool, str]:
     """
     Execute an AppleScript and return the result.
 
     Args:
         script: AppleScript code to execute
         timeout: Maximum execution time in seconds
+        operation: Description of the operation for logging
 
     Returns:
         Tuple of (success, output_or_error)
     """
+    start_time = time.perf_counter()
+    _logger.debug(f"AppleScript start: {operation}")
+
     try:
         result = subprocess.run(
             ['osascript', '-e', script],
@@ -28,13 +37,24 @@ def run_applescript(script: str, timeout: int = 30) -> tuple[bool, str]:
             text=True,
             timeout=timeout
         )
+        elapsed = time.perf_counter() - start_time
+
         if result.returncode == 0:
+            if elapsed > 2.0:
+                _logger.warning(f"AppleScript SLOW ({operation}): {elapsed:.2f}s")
+            else:
+                _logger.debug(f"AppleScript done ({operation}): {elapsed:.3f}s")
             return True, result.stdout.strip()
         else:
+            _logger.error(f"AppleScript failed ({operation}) after {elapsed:.3f}s: {result.stderr.strip()}")
             return False, result.stderr.strip()
     except subprocess.TimeoutExpired:
+        elapsed = time.perf_counter() - start_time
+        _logger.error(f"AppleScript TIMEOUT ({operation}) after {elapsed:.2f}s")
         return False, "AppleScript execution timed out"
     except Exception as e:
+        elapsed = time.perf_counter() - start_time
+        _logger.error(f"AppleScript error ({operation}) after {elapsed:.3f}s: {e}")
         return False, str(e)
 
 
@@ -81,7 +101,7 @@ tell application "Mail"
     return "NOT_FOUND"
 end tell
 '''
-    success, result = run_applescript(script)
+    success, result = run_applescript(script, operation="find_account_by_uuid")
     if success and result != "NOT_FOUND":
         return True, result
     return False, f"Account with UUID {account_uuid} not found"
@@ -157,7 +177,7 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=timeout)
+    success, result = run_applescript(script, timeout=timeout, operation=f"download_message_{message_id}")
 
     if not success:
         return {
@@ -299,7 +319,7 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=30)
+    success, result = run_applescript(script, timeout=30, operation=f"open_message_{message_id}")
 
     if success and result == "SUCCESS":
         return {
@@ -381,7 +401,7 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=30)
+    success, result = run_applescript(script, timeout=30, operation=f"set_flag_{message_id}_{color}")
 
     if success and result.startswith("SUCCESS:"):
         new_flag = int(result.split(":")[1])
@@ -462,7 +482,8 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=30)
+    read_op = "mark_read" if is_read else "mark_unread"
+    success, result = run_applescript(script, timeout=30, operation=f"{read_op}_{message_id}")
 
     if success and result.startswith("SUCCESS:"):
         new_status = result.split(":")[1] == "true"
@@ -563,7 +584,7 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=timeout)
+    success, result = run_applescript(script, timeout=timeout, operation=f"download_silent_{message_id}")
 
     if not success:
         return {
@@ -606,7 +627,7 @@ end tell
 return "SUCCESS"
 '''
 
-    success, result = run_applescript(script, timeout=10)
+    success, result = run_applescript(script, timeout=10, operation="minimize_mail")
 
     if success:
         return {"success": True, "message": "Mail windows minimized"}
@@ -649,7 +670,7 @@ tell application "Mail"
 end tell
 '''
 
-    success, result = run_applescript(script, timeout=30)
+    success, result = run_applescript(script, timeout=30, operation="close_all_message_windows")
 
     if success and result.startswith("SUCCESS:"):
         count = int(result.split(":")[1])
