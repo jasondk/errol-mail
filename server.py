@@ -165,6 +165,11 @@ from applescript_helper import (
 )
 
 
+# Folders excluded from discovery tools by default (security measure).
+# Junk/spam/trash folders are more likely to contain malicious content
+# including prompt injection attempts. Only include when user explicitly asks.
+DEFAULT_EXCLUDED_FOLDERS = ["Junk", "Trash", "Spam", "Deleted", "Bin"]
+
 # Create the MCP server
 mcp = FastMCP("apple-mail")
 
@@ -240,19 +245,24 @@ def find_mailbox(search_term: str) -> str:
 
 @mcp.tool()
 @log_tool_call
-def get_recent_messages(limit: int = 20, include_read: bool = True) -> str:
+def get_recent_messages(limit: int = 20, include_read: bool = True, include_junk_trash: bool = False) -> str:
     """
     Get recent messages from all mailboxes.
 
     Args:
         limit: Maximum number of messages to return (default: 20)
         include_read: Whether to include read messages (default: True)
+        include_junk_trash: Include messages from Junk/Spam/Trash folders (default: False).
+            These folders are excluded by default as a security measure since junk mail
+            is more likely to contain malicious content such as prompt injection attempts.
+            Only set to True when the user explicitly asks to see junk, spam, or trash.
 
     Returns recent messages sorted by date received, newest first.
     """
     try:
         query = MessageQuery()
-        messages = query.get_recent_messages(limit=limit, include_read=include_read)
+        exclude = DEFAULT_EXCLUDED_FOLDERS if not include_junk_trash else None
+        messages = query.get_recent_messages(limit=limit, include_read=include_read, exclude_folders=exclude)
 
         if not messages:
             return "No messages found"
@@ -265,18 +275,23 @@ def get_recent_messages(limit: int = 20, include_read: bool = True) -> str:
 
 @mcp.tool()
 @log_tool_call
-def get_unread_messages(limit: int = 20) -> str:
+def get_unread_messages(limit: int = 20, include_junk_trash: bool = False) -> str:
     """
     Get unread messages from all mailboxes.
 
     Args:
         limit: Maximum number of messages to return (default: 20)
+        include_junk_trash: Include messages from Junk/Spam/Trash folders (default: False).
+            These folders are excluded by default as a security measure since junk mail
+            is more likely to contain malicious content such as prompt injection attempts.
+            Only set to True when the user explicitly asks to see junk, spam, or trash.
 
     Returns unread messages sorted by date received, newest first.
     """
     try:
         query = MessageQuery()
-        messages = query.get_recent_messages(limit=limit, include_read=False)
+        exclude = DEFAULT_EXCLUDED_FOLDERS if not include_junk_trash else None
+        messages = query.get_recent_messages(limit=limit, include_read=False, exclude_folders=exclude)
 
         if not messages:
             return "No unread messages!"
@@ -328,7 +343,8 @@ def search_messages(
     sender: Optional[str] = None,
     days_back: Optional[int] = None,
     folder: Optional[str] = None,
-    limit: int = 50
+    limit: int = 50,
+    include_junk_trash: bool = False
 ) -> str:
     """
     Search messages with filters.
@@ -339,6 +355,10 @@ def search_messages(
         days_back: Only search messages from the last N days
         folder: Filter by folder/mailbox name (partial match, e.g., "Projects", "INBOX", "Sent")
         limit: Maximum results (default: 50)
+        include_junk_trash: Include messages from Junk/Spam/Trash folders (default: False).
+            These folders are excluded by default as a security measure since junk mail
+            is more likely to contain malicious content such as prompt injection attempts.
+            Only set to True when the user explicitly asks to search junk, spam, or trash.
 
     At least one filter should be provided. Returns matching messages sorted by date.
     """
@@ -347,11 +367,13 @@ def search_messages(
 
     try:
         query = MessageQuery()
+        exclude = DEFAULT_EXCLUDED_FOLDERS if not include_junk_trash else None
         messages = query.search_messages(
             subject_contains=subject,
             sender_contains=sender,
             days_back=days_back,
             folder=folder,
+            exclude_folders=exclude,
             limit=limit
         )
 
@@ -383,7 +405,8 @@ def search_messages(
 def get_flagged_messages(
     color: Optional[str] = None,
     folder: Optional[str] = None,
-    limit: int = 20
+    limit: int = 20,
+    include_junk_trash: bool = False
 ) -> str:
     """
     Get flagged messages, optionally filtered by flag color or folder.
@@ -393,6 +416,10 @@ def get_flagged_messages(
                or by your custom label name
         folder: Filter by folder name (partial match)
         limit: Maximum messages (default: 20)
+        include_junk_trash: Include messages from Junk/Spam/Trash folders (default: False).
+            These folders are excluded by default as a security measure since junk mail
+            is more likely to contain malicious content such as prompt injection attempts.
+            Only set to True when the user explicitly asks to see junk, spam, or trash.
 
     Returns flagged messages with their flag color/label shown.
 
@@ -450,6 +477,12 @@ def get_flagged_messages(
                 WHERE m.flagged = 1
             """
             params = []
+
+            # Exclude junk/trash folders by default
+            if not include_junk_trash:
+                like_clauses = " OR ".join(["mb.url LIKE ?" for _ in DEFAULT_EXCLUDED_FOLDERS])
+                query += f" AND NOT ({like_clauses})"
+                params.extend([f"%{pattern}%" for pattern in DEFAULT_EXCLUDED_FOLDERS])
 
             # Filter by color using bits 39-41 of flags
             if flag_color_filter:

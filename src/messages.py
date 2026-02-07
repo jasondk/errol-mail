@@ -286,6 +286,7 @@ class MessageQuery:
         sender_contains: Optional[str] = None,
         days_back: Optional[int] = None,
         folder: Optional[str] = None,
+        exclude_folders: Optional[List[str]] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """
@@ -296,6 +297,7 @@ class MessageQuery:
             sender_contains: Filter by sender address (case-insensitive)
             days_back: Only include messages from the last N days
             folder: Filter by folder name (partial match, e.g., "Projects" or "INBOX")
+            exclude_folders: List of folder name patterns to exclude (e.g., ["Junk", "Spam", "Trash"])
             limit: Maximum results
 
         Returns:
@@ -326,6 +328,12 @@ class MessageQuery:
             """
             conditions = []
             params = []
+
+            # Handle exclude_folders by filtering out matching mailbox URLs
+            if exclude_folders:
+                like_clauses = " OR ".join(["mb.url LIKE ?" for _ in exclude_folders])
+                conditions.append(f"NOT ({like_clauses})")
+                params.extend([f"%{pattern}%" for pattern in exclude_folders])
 
             if sender_contains:
                 # Split search term into words for flexible matching
