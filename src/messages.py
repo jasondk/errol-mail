@@ -141,6 +141,111 @@ class MessageQuery:
 
             return messages
 
+    def get_flagged_messages(
+        self,
+        limit: int = 500,
+        exclude_folders: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all flagged messages across all mailboxes.
+
+        Args:
+            limit: Maximum number of messages to return
+            exclude_folders: List of folder name patterns to exclude (e.g., ["Junk", "Spam", "Trash"])
+
+        Returns:
+            List of message dictionaries (same format as get_recent_messages)
+        """
+        if exclude_folders is None:
+            exclude_folders = ["Junk", "Spam", "Trash", "Deleted"]
+
+        with self.db.connection() as conn:
+            # Build subquery to get flagged message ROWIDs
+            subquery = "SELECT ROWID FROM messages WHERE flagged = 1"
+            subquery_params = []
+
+            # Handle exclude_folders by getting excluded mailbox IDs
+            excluded_mailbox_ids = []
+            if exclude_folders:
+                like_clauses = " OR ".join(["url LIKE ?" for _ in exclude_folders])
+                exclude_query = f"SELECT ROWID FROM mailboxes WHERE {like_clauses}"
+                exclude_params = [f"%{pattern}%" for pattern in exclude_folders]
+                excluded_mailbox_ids = [row[0] for row in conn.execute(exclude_query, exclude_params).fetchall()]
+                if excluded_mailbox_ids:
+                    placeholders = ",".join("?" * len(excluded_mailbox_ids))
+                    subquery += f" AND mailbox NOT IN ({placeholders})"
+                    subquery_params.extend(excluded_mailbox_ids)
+
+            subquery += " ORDER BY date_received DESC LIMIT ?"
+            subquery_params.append(limit)
+
+            # Main query joins only the rows we need
+            query = f"""
+                SELECT
+                    m.ROWID as message_id,
+                    m.mailbox,
+                    m.subject_prefix,
+                    subj.subject as subject_text,
+                    m.date_sent,
+                    m.date_received,
+                    m.read,
+                    m.flagged,
+                    m.flag_color,
+                    m.size,
+                    m.conversation_id,
+                    mgd.message_id_header,
+                    mb.url as mailbox_url,
+                    sender_addr.address as sender_email,
+                    sender_addr.comment as sender_name
+                FROM messages m
+                LEFT JOIN message_global_data mgd ON m.global_message_id = mgd.ROWID
+                LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID
+                LEFT JOIN subjects subj ON m.subject = subj.ROWID
+                LEFT JOIN addresses sender_addr ON m.sender = sender_addr.ROWID
+                WHERE m.ROWID IN ({subquery})
+                ORDER BY m.date_received DESC
+            """
+            params = subquery_params
+
+            cursor = conn.execute(query, params)
+
+            messages = []
+            for row in cursor.fetchall():
+                # Build subject with prefix
+                subject = row["subject_text"] or ""
+                if row["subject_prefix"]:
+                    subject = row["subject_prefix"] + subject
+
+                # Build sender display
+                sender_email = row["sender_email"]
+                sender_name = row["sender_name"]
+                if sender_name and sender_email:
+                    sender = f"{sender_name} <{sender_email}>"
+                elif sender_email:
+                    sender = sender_email
+                else:
+                    sender = None
+
+                msg = {
+                    "message_id": row["message_id"],
+                    "mailbox_id": row["mailbox"],
+                    "subject": subject,
+                    "date_sent": self._format_timestamp(row["date_sent"]),
+                    "date_received": self._format_timestamp(row["date_received"]),
+                    "is_read": bool(row["read"]),
+                    "is_flagged": bool(row["flagged"]),
+                    "flag_color": row["flag_color"],
+                    "size_bytes": row["size"],
+                    "conversation_id": row["conversation_id"],
+                    "rfc_message_id": row["message_id_header"],
+                    "mailbox_url": row["mailbox_url"],
+                    "from": sender,
+                }
+
+                messages.append(msg)
+
+            return messages
+
     def get_messages_by_folder(
         self,
         folder_name: str,
