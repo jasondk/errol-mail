@@ -9,11 +9,51 @@ Includes security features for prompt injection detection.
 import email
 import email.policy
 from email.header import decode_header
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 import plistlib
 import re
 import os
+
+
+def _html_to_text(html: str) -> str:
+    """Convert HTML to plain text using stdlib HTMLParser."""
+
+    class _Extractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self._pieces: list[str] = []
+            self._skip = False
+            self._block_tags = {'p', 'div', 'br', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'}
+            self._skip_tags = {'style', 'script', 'head'}
+
+        def handle_starttag(self, tag, attrs):
+            if tag in self._skip_tags:
+                self._skip = True
+            if tag in self._block_tags:
+                self._pieces.append('\n')
+            if tag == 'a':
+                for name, value in attrs:
+                    if name == 'href' and value:
+                        self._pieces.append(f' [{value}] ')
+
+        def handle_endtag(self, tag):
+            if tag in self._skip_tags:
+                self._skip = False
+            if tag in self._block_tags:
+                self._pieces.append('\n')
+
+        def handle_data(self, data):
+            if not self._skip:
+                self._pieces.append(data)
+
+    extractor = _Extractor()
+    extractor.feed(html)
+    text = ''.join(extractor._pieces)
+    # Collapse runs of blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 # ============================================================================
@@ -402,6 +442,10 @@ def parse_emlx_file(
                     body_html = decoded
                 else:
                     body_text = decoded
+
+        # Fallback: convert HTML to plain text when no text/plain part exists
+        if not body_text.strip() and body_html:
+            body_text = _html_to_text(body_html)
 
         # Process body text
         body_text = body_text.strip()
